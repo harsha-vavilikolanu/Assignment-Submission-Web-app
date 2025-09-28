@@ -1,8 +1,12 @@
 package com.example.struts;
 
-import com.opensymphony.xwork2.ActionSupport;
+
 import org.hibernate.Session;
 import org.hibernate.Transaction;
+
+import com.opensymphony.xwork2.ActionSupport;
+
+import java.util.*;
 
 public class AssignmentAction extends ActionSupport {
 
@@ -35,9 +39,9 @@ public class AssignmentAction extends ActionSupport {
             studentId == null || studentId.isEmpty() ||
             courseName == null || courseName.isEmpty() ||
             assignmentTitle == null || assignmentTitle.isEmpty() ||
-            content == null ) {
-            
-            addActionError("All fields are required and content");
+            content == null || content.isEmpty()) {
+
+            addActionError("All fields are required.");
             return ERROR;
         }
 
@@ -46,20 +50,31 @@ public class AssignmentAction extends ActionSupport {
             return ERROR;
         }
 
-        // Create entity object
-        Assignment assignment = new Assignment();
-        assignment.setStudentName(studentName);
-        assignment.setStudentId(studentId);
-        assignment.setCourseName(courseName);
-        assignment.setAssignmentTitle(assignmentTitle);
-        assignment.setContent(content);
-
         Session session = null;
         Transaction tx = null;
 
         try {
             session = HibernateUtil.getSessionFactory().openSession();
+
+            // --- plagiarism check ---
+            List<Assignment> assignments = session.createQuery("from Assignment", Assignment.class).list();
+            for (Assignment existing : assignments) {
+                double score = calculateSimilarity(content, existing.getContent());
+                if (score >= 0.75) {
+                    addActionError("Plagiarism detected: " + (int)(score * 100) + "% match with existing work.");
+                    return ERROR;
+                }
+            }
+
+            // No plagiarism -> Save new assignment
             tx = session.beginTransaction();
+
+            Assignment assignment = new Assignment();
+            assignment.setStudentName(studentName);
+            assignment.setStudentId(studentId);
+            assignment.setCourseName(courseName);
+            assignment.setAssignmentTitle(assignmentTitle);
+            assignment.setContent(content);
 
             session.save(assignment);
 
@@ -83,4 +98,20 @@ public class AssignmentAction extends ActionSupport {
             }
         }
     }
+
+   
+    private double calculateSimilarity(String text1, String text2) {
+        Set<String> words1 = new HashSet<>(Arrays.asList(text1.toLowerCase().split("\\s+")));
+        Set<String> words2 = new HashSet<>(Arrays.asList(text2.toLowerCase().split("\\s+")));
+
+        Set<String> intersection = new HashSet<>(words1);
+        intersection.retainAll(words2);
+
+        Set<String> union = new HashSet<>(words1);
+        union.addAll(words2);
+
+        if (union.isEmpty()) return 0.0;
+        return (double) intersection.size() / union.size();
+    }
 }
+
